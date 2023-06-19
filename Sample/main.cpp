@@ -37,9 +37,6 @@ const vn::Node &vn::Graph::node(const vn::NodeId id) const
 
 const QSet<vn::NodeId> vn::Graph::next(const vn::NodeId id) const
 {
-    if (!connections_.contains(id))
-        throw Error(QString("Missing connections for node with id %1").arg(id));
-
     return connections_.value(id, {});
 }
 
@@ -59,20 +56,31 @@ void vn::traverse_(
         QSet<NodeId> &traversed)
 {
     const Node &node = graph.node(id);
+    visitor.stepIn(node);
+    if (traversed.contains(id)) {
+        visitor.stepOut(node);
+        return;
+    }
+
     traversed.insert(id);
     node.accept(visitor);
 
-    if (visitor.shouldStop())
+    if (visitor.shouldStop()) {
+        visitor.stepOut(node);
         return;
+    }
 
-    QSet<vn::NodeId> next = graph.next(id);
-    next -= traversed;
+    const QSet<vn::NodeId> next = graph.next(id);
+    if (next.isEmpty()) {
+        visitor.stepOut(node);
+        return;
+    }
 
     QList<vn::NodeId> nextSorted = next.toList();
     std::sort(nextSorted.begin(), nextSorted.end());
-
     for (const NodeId id : nextSorted)
         traverse_(graph, id, visitor, traversed);
+    visitor.stepOut(node);
 }
 
 void vn::Frame::accept(Visitor &visitor) const
@@ -85,6 +93,11 @@ void vn::Predicate::accept(Visitor &visitor) const
     return visitor.visit(*this);
 }
 
+void vn::Op::accept(Visitor &visitor) const
+{
+    return visitor.visit(*this);
+}
+
 vn::Print::Print(const vn::Node *start) :
     start_(start)
 {}
@@ -92,7 +105,8 @@ vn::Print::Print(const vn::Node *start) :
 void vn::Print::visit(const Frame &frame)
 {
     shouldStop_ = &frame != start_;
-    qDebug()
+    qDebug().noquote()
+            << space(depth_)
             << "frame"
             << &frame
             << frame.title()
@@ -104,7 +118,8 @@ void vn::Print::visit(const Predicate &predicate)
 {
     Q_UNUSED(predicate)
     shouldStop_ = false;
-    qDebug()
+    qDebug().noquote()
+            << space(depth_)
             << "predicate"
             << &predicate
             << predicate.title()
@@ -117,22 +132,159 @@ void vn::Print::visit(const Counter &counter)
 {
     Q_UNUSED(counter)
     shouldStop_ = false;
-    qDebug() << "counter";
+    qDebug().noquote()
+            << space(depth_)
+            << "counter";
 }
 
 void vn::Print::visit(const Advance &advance)
 {
     Q_UNUSED(advance)
     shouldStop_ = false;
-    qDebug() << "advance";
+    qDebug().noquote()
+            << space(depth_)
+            << "advance";
 }
 
 void vn::Print::visit(const Op &advance)
 {
     Q_UNUSED(advance)
     shouldStop_ = false;
-    qDebug() << "op";
+    qDebug().noquote()
+            << space(depth_)
+            << "op";
 }
+
+QString vn::Print::space(const int depth)
+{
+    return QString("*").rightJustified(depth * 2);
+}
+
+
+//void vn::ToJson::visit(const Frame &frame)
+//{
+//    Q_ASSERT(!ids_.contains(&frame));
+//    const NodeId id = ids_.isEmpty() ? 0 : (ids_.last() + 1);
+//    ids_.insert(&frame, id);
+//    last_ = &frame;
+////    qDebug() << "frame" << id << frame.title() << frame.text();
+
+//    if (!stack_.isEmpty() && stack_.back() != last_) {
+//        const NodeId src = ids_.value(stack_.back(), -1);
+//        const NodeId dst = id;
+//        qDebug().noquote().nospace() << src  << "->" << dst << ";";
+//    }
+//}
+
+//void vn::ToJson::visit(const Predicate &predicate)
+//{
+
+//}
+
+//void vn::ToJson::visit(const Counter &counter)
+//{
+
+//}
+
+//void vn::ToJson::visit(const Advance &advance)
+//{
+
+//}
+
+//void vn::ToJson::visit(const Op &advance)
+//{
+
+//}
+
+//void vn::ToJson::increaseDepth()
+//{
+//    stack_.push_back(last_);
+//}
+
+//void vn::ToJson::decreaseDepth()
+//{
+//    last_ = stack_.back();
+//    stack_.pop_back();
+//}
+
+//void vn::Compute::visit(const Frame &frame)
+//{
+
+//}
+
+void vn::Compute::visit(const Predicate &predicate)
+{
+
+}
+
+void vn::Compute::visit(const Counter &counter)
+{
+
+}
+
+void vn::Compute::visit(const Advance &advance)
+{
+
+}
+
+void vn::Compute::visit(const Op &advance)
+{
+
+}
+
+void vn::Compute::visit(const Equal &op)
+{
+}
+
+void vn::Compute::visit(const NonEqual &op)
+{
+
+}
+
+void vn::Compute::visit(const Static42 &)
+{
+    stack_.push_back(42);
+}
+
+void vn::Compute::visit(const Static69 &)
+{
+    stack_.push_back(69);
+}
+
+void vn::Static42::accept(Compute &compute) const
+{
+    return compute.visit(*this);
+}
+
+void vn::Static69::accept(Compute &compute) const
+{
+    return compute.visit(*this);
+}
+
+void vn::Equal::accept(Compute &compute) const
+{
+    return compute.visit(*this);
+}
+
+void vn::NonEqual::accept(Compute &compute) const
+{
+    return compute.visit(*this);
+}
+
+//std::ostream &operator<<(std::ostream &stream, const vn::Op::Value &value)
+//{
+//    std::visit([&stream](auto &&arg) {
+//        using T = std::decay_t<decltype(arg)>;
+//        const std::size_t ind = vn::variant_index<vn::Op::Value, T>();
+//        stream << vn::Op::names.at(ind);
+//        if constexpr (std::is_same_v<T, int>)
+//            stream << " " << arg;
+//        else if constexpr (std::is_same_v<T, bool>)
+//            stream << (arg ? " True" : " False");
+//    }, value);
+//    return stream;
+//}
+
 
 //bool vn::PredicateCompare::isOk(const Counters &counters) const
 //{
@@ -172,21 +324,6 @@ int main(int argc, char *argv[])
     /// TODO:
     /// frame -> [[predicate] -> frame]*
 
-    vn::Op::Value res;
-    vn::Text err;
-    vn::Op op;
-    std::vector<vn::Op::Value> values {
-        vn::Op::Value(42),
-                vn::Op::Value(true),
-        vn::Op::Value(6900),
-        vn::Op::Value(vn::Op::Void()),
-        vn::Op::Value(false),
-    };
-    std::cout
-            << op.compute(values.data(), res, err)  << "\n"
-            << err.toStdString() << "\n"
-            << res << "\n";
-
     auto *nodeFrameStart     = new vn::FrameStatic();
     auto *nodeFrameChoice    = new vn::FrameStatic();
     auto *nodeFrameMines     = new vn::FrameStatic();
@@ -197,13 +334,13 @@ int main(int argc, char *argv[])
     auto *nodeFrameBuyGoBack = new vn::FrameStatic();
     auto *nodeFrameAdventure = new vn::FrameStatic();
     auto *nodePredicateHas20gp = new vn::PredicateStatic();
-    nodeFrameStart->title_ = "";
+    nodeFrameStart->title_ = "Start";
     nodeFrameStart->text_ = "Welcome!";
-    nodeFrameChoice->title_ = "";
+    nodeFrameChoice->title_ = "Choice";
     nodeFrameChoice->text_ = "Where would you go?";
     nodeFrameMines->title_ = "Golden mines";
     nodeFrameMines->text_ = "You are approaching the golden mines";
-    nodeFrameMinesWork->title_ = "";
+    nodeFrameMinesWork->title_ = "Work";
     nodeFrameMinesWork->text_ = "You are working hard in mines and doing your job";
     nodeFrameShop->title_ = "Shop";
     nodeFrameShop->text_ = "You are moving your bones to the town merchant";
@@ -243,6 +380,15 @@ int main(int argc, char *argv[])
     graph.connect(idShop, idBack);
     graph.connect(idBack, idChoice);
 
+    const vn::NodeId id42 = graph.add(new vn::Static42);
+    const vn::NodeId id69 = graph.add(new vn::Static69);
+    const vn::NodeId idEq = graph.add(new vn::Equal);
+    const vn::NodeId idNeq = graph.add(new vn::NonEqual);
+    graph.connect(id42, idEq);
+    graph.connect(id69, idEq);
+    graph.connect(id42, idNeq);
+    graph.connect(id69, idNeq);
+
     try {
         vn::Print print = vn::Print(nodeFrameChoice);
         vn::traverse(graph, 1, print);
@@ -251,9 +397,15 @@ int main(int argc, char *argv[])
         print = vn::Print(nodeFrameShop);
         vn::traverse(graph, 4, print);
 
+
     } catch (const vn::Error &err) {
         qDebug() << err.message;
         return 1;
     }
+
+    vn::ToGraphViz json;
+    vn::traverse(graph, 0, json);
+    qDebug() << json.digraphText();
+
     return 0;
 }
