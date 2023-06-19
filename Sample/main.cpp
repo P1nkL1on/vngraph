@@ -99,6 +99,20 @@ void vn::Print::visit(const Advance &advance)
     qDebug() << "advance";
 }
 
+bool vn::PredicateCompare::isOk(const Counters &counters) const
+{
+    const int counter = counters.value(nodeId_);
+    switch (compareOption_) {
+    case Greater:        return counter >  valueToCompare_;
+    case Less:           return counter <  valueToCompare_;
+    case GreaterOrEqual: return counter >= valueToCompare_;
+    case LessOrEqual:    return counter <= valueToCompare_;
+    case Equal:          return counter == valueToCompare_;
+    case NonEqual:       return counter != valueToCompare_;
+    }
+    throw new Error(QString("Unknown predicate compare option: %1").arg(compareOption_));
+}
+
 int main(int argc, char *argv[])
 {
     Q_UNUSED(argc)
@@ -123,15 +137,15 @@ int main(int argc, char *argv[])
     /// TODO:
     /// frame -> [[predicate] -> frame]*
 
-    auto *nodeFrameStart     = new vn::StaticFrame();
-    auto *nodeFrameChoice    = new vn::StaticFrame();
-    auto *nodeFrameMines     = new vn::StaticFrame();
-    auto *nodeFrameMinesWork = new vn::StaticFrame();
-    auto *nodeFrameShop      = new vn::StaticFrame();
-    auto *nodeFrameBuySword  = new vn::StaticFrame();
-    auto *nodeFrameBuyApple  = new vn::StaticFrame();
-    auto *nodeFrameBuyGoBack = new vn::StaticFrame();
-    auto *nodeFrameAdventure = new vn::StaticFrame();
+    auto *nodeFrameStart     = new vn::FrameStatic();
+    auto *nodeFrameChoice    = new vn::FrameStatic();
+    auto *nodeFrameMines     = new vn::FrameStatic();
+    auto *nodeFrameMinesWork = new vn::FrameStatic();
+    auto *nodeFrameShop      = new vn::FrameStatic();
+    auto *nodeFrameBuySword  = new vn::FrameStatic();
+    auto *nodeFrameBuyApple  = new vn::FrameStatic();
+    auto *nodeFrameBuyGoBack = new vn::FrameStatic();
+    auto *nodeFrameAdventure = new vn::FrameStatic();
     nodeFrameStart->title_ = "";
     nodeFrameStart->text_ = "Welcome!";
     nodeFrameChoice->title_ = "";

@@ -17,6 +17,7 @@ using Text = QString;
 
 struct Visitor;
 struct Counters;
+struct FrameStatic;
 
 
 struct Node
@@ -37,7 +38,6 @@ struct Frame : Node
 
 struct Predicate : Node
 {
-    virtual ~Predicate() = default;
     virtual Text title() const = 0;
     virtual Text text() const = 0;
     virtual bool isOk(const Counters &) const = 0;
@@ -46,7 +46,6 @@ struct Predicate : Node
 
 struct Counter : Node
 {
-    virtual ~Counter() = default;
     virtual Text title() const = 0;
     virtual Text description() const = 0;
     virtual int initialValue() const = 0;
@@ -55,7 +54,6 @@ struct Counter : Node
 
 struct Advance : Node
 {
-    virtual ~Advance() = default;
     virtual void redo(Counters &) const = 0;
     virtual void undo(Counters &) const = 0;
 };
@@ -99,15 +97,42 @@ void traverse(const Graph &graph, const NodeId id, Visitor &visitor);
 void traverse_(const Graph &graph, const NodeId id, Visitor &visitor, QSet<NodeId> &traversed);
 
 
-struct StaticFrame : Frame
+struct FrameStatic : Frame
 {
-    StaticFrame() = default;
+    FrameStatic() = default;
     inline Text title() const override          { return title_; }
     inline Text text() const override           { return text_; }
-    inline SpeakerId speakerId() const override { return speakerId_; }
+    inline SpeakerId speakerId() const override { return -1; }
     Text title_;
     Text text_;
-    SpeakerId speakerId_ = -1;
+};
+
+
+struct Counters
+{
+    // TODO: change to match a real one
+    int value(const NodeId) const { return 42; }
+};
+
+
+struct PredicateCompare : Predicate
+{
+    PredicateCompare() = default;
+    inline Text title() const override { return title_; }
+    inline Text text() const override  { return text_; }
+    bool isOk(const Counters &) const override;
+    Text title_;
+    Text text_;
+    NodeId nodeId_ = -1;
+    int valueToCompare_ = 0;
+    enum {
+        Greater,
+        Less,
+        GreaterOrEqual,
+        LessOrEqual,
+        Equal,
+        NonEqual,
+    } compareOption_ = Greater;
 };
 
 
