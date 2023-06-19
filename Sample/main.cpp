@@ -1,6 +1,7 @@
 #include <QtDebug>
 #include <QList>
 
+#include <iostream>
 #include "headers.h"
 
 
@@ -8,6 +9,22 @@ vn::Error::Error(const QString &message) :
     std::runtime_error(message.toStdString()),
     message(message)
 {}
+
+vn::NodeId vn::Graph::add(Node *node)
+{
+    const NodeId nextKey = nodes_.isEmpty() ? 0 : (nodes_.lastKey() + 1);
+    nodes_.insert(nextKey, node);
+    return nextKey;
+}
+
+void vn::Graph::connect(const NodeId src, const NodeId dst)
+{
+    if (!nodes_.contains(src))
+        throw Error(QString("Missing node with id %1 as connection source").arg(src));
+    if (!nodes_.contains(dst))
+        throw Error(QString("Missing node with id %1 as connection destination").arg(dst));
+    connections_[src].insert(dst);
+}
 
 const vn::Node &vn::Graph::node(const vn::NodeId id) const
 {
@@ -63,6 +80,11 @@ void vn::Frame::accept(Visitor &visitor) const
     return visitor.visit(*this);
 }
 
+void vn::Predicate::accept(Visitor &visitor) const
+{
+    return visitor.visit(*this);
+}
+
 vn::Print::Print(const vn::Node *start) :
     start_(start)
 {}
@@ -82,7 +104,13 @@ void vn::Print::visit(const Predicate &predicate)
 {
     Q_UNUSED(predicate)
     shouldStop_ = false;
-    qDebug() << "predicate";
+    qDebug()
+            << "predicate"
+            << &predicate
+            << predicate.title()
+            << predicate.text()
+            << "satisfied: "
+            << predicate.isOk();
 }
 
 void vn::Print::visit(const Counter &counter)
@@ -99,19 +127,26 @@ void vn::Print::visit(const Advance &advance)
     qDebug() << "advance";
 }
 
-bool vn::PredicateCompare::isOk(const Counters &counters) const
+void vn::Print::visit(const Op &advance)
 {
-    const int counter = counters.value(nodeId_);
-    switch (compareOption_) {
-    case Greater:        return counter >  valueToCompare_;
-    case Less:           return counter <  valueToCompare_;
-    case GreaterOrEqual: return counter >= valueToCompare_;
-    case LessOrEqual:    return counter <= valueToCompare_;
-    case Equal:          return counter == valueToCompare_;
-    case NonEqual:       return counter != valueToCompare_;
-    }
-    throw new Error(QString("Unknown predicate compare option: %1").arg(compareOption_));
+    Q_UNUSED(advance)
+    shouldStop_ = false;
+    qDebug() << "op";
 }
+
+//bool vn::PredicateCompare::isOk(const Counters &counters) const
+//{
+//    const int counter = counters.value(nodeId_);
+//    switch (compareOption_) {
+//    case Greater:        return counter >  valueToCompare_;
+//    case Less:           return counter <  valueToCompare_;
+//    case GreaterOrEqual: return counter >= valueToCompare_;
+//    case LessOrEqual:    return counter <= valueToCompare_;
+//    case Equal:          return counter == valueToCompare_;
+//    case NonEqual:       return counter != valueToCompare_;
+//    }
+//    throw new Error(QString("Unknown predicate compare option: %1").arg(compareOption_));
+//}
 
 int main(int argc, char *argv[])
 {
@@ -137,6 +172,21 @@ int main(int argc, char *argv[])
     /// TODO:
     /// frame -> [[predicate] -> frame]*
 
+    vn::Op::Value res;
+    vn::Text err;
+    vn::Op op;
+    std::vector<vn::Op::Value> values {
+        vn::Op::Value(42),
+                vn::Op::Value(true),
+        vn::Op::Value(6900),
+        vn::Op::Value(vn::Op::Void()),
+        vn::Op::Value(false),
+    };
+    std::cout
+            << op.compute(values.data(), res, err)  << "\n"
+            << err.toStdString() << "\n"
+            << res << "\n";
+
     auto *nodeFrameStart     = new vn::FrameStatic();
     auto *nodeFrameChoice    = new vn::FrameStatic();
     auto *nodeFrameMines     = new vn::FrameStatic();
@@ -146,6 +196,7 @@ int main(int argc, char *argv[])
     auto *nodeFrameBuyApple  = new vn::FrameStatic();
     auto *nodeFrameBuyGoBack = new vn::FrameStatic();
     auto *nodeFrameAdventure = new vn::FrameStatic();
+    auto *nodePredicateHas20gp = new vn::PredicateStatic();
     nodeFrameStart->title_ = "";
     nodeFrameStart->text_ = "Welcome!";
     nodeFrameChoice->title_ = "";
@@ -159,34 +210,38 @@ int main(int argc, char *argv[])
     nodeFrameBuySword->title_ = "Buy a sword";
     nodeFrameBuySword->text_ = "A good sword of old master found a shelter in yout untrained arms";
     nodeFrameBuyApple->title_ = "Buy an apple";
-    nodeFrameBuyApple->title_ = "Your hunger is no more";
+    nodeFrameBuyApple->text_ = "Your hunger is no more";
     nodeFrameBuyGoBack->title_ = "Turn around";
     nodeFrameBuyGoBack->text_ = "You came back where you started";
     nodeFrameAdventure->title_ = "Adventure";
     nodeFrameAdventure->text_ = "You are going to the adventure! Finally...";
+    nodePredicateHas20gp->title_ = "Has 20 gp";
+    nodePredicateHas20gp->text_ = "You probably should work on mines for a while...";
 
     vn::Graph graph;
-    graph.nodes_.insert(0, nodeFrameStart);
-    graph.nodes_.insert(1, nodeFrameChoice);
-    graph.nodes_.insert(2, nodeFrameMines);
-    graph.nodes_.insert(3, nodeFrameMinesWork);
-    graph.nodes_.insert(4, nodeFrameShop);
-    graph.nodes_.insert(5, nodeFrameBuySword);
-    graph.nodes_.insert(6, nodeFrameBuyApple);
-    graph.nodes_.insert(7, nodeFrameBuyGoBack);
-    graph.nodes_.insert(8, nodeFrameAdventure);
-    graph.connections_[0].insert(1);
-    graph.connections_[1].insert(2);
-    graph.connections_[1].insert(4);
-    graph.connections_[1].insert(8);
-    graph.connections_[2].insert(3);
-    graph.connections_[3].insert(1);
-    graph.connections_[4].insert(5);
-    graph.connections_[5].insert(4);
-    graph.connections_[4].insert(6);
-    graph.connections_[6].insert(4);
-    graph.connections_[4].insert(7);
-    graph.connections_[7].insert(1);
+    const vn::NodeId idStart = graph.add(nodeFrameStart);
+    const vn::NodeId idChoice = graph.add(nodeFrameChoice);
+    const vn::NodeId idMines = graph.add(nodeFrameMines);
+    const vn::NodeId idWork = graph.add(nodeFrameMinesWork);
+    const vn::NodeId idShop = graph.add(nodeFrameShop);
+    const vn::NodeId idSword = graph.add(nodeFrameBuySword);
+    const vn::NodeId idApple = graph.add(nodeFrameBuyApple);
+    const vn::NodeId idBack = graph.add(nodeFrameBuyGoBack);
+    const vn::NodeId idEnd = graph.add(nodeFrameAdventure);
+    const vn::NodeId idCheck20gp = graph.add(nodePredicateHas20gp);
+    graph.connect(idStart, idChoice);
+    graph.connect(idChoice, idMines);
+    graph.connect(idChoice, idShop);
+    graph.connect(idChoice, idEnd);
+    graph.connect(idMines, idWork);
+    graph.connect(idWork, idChoice);
+    graph.connect(idShop, idCheck20gp);
+    graph.connect(idCheck20gp, idSword);
+    graph.connect(idSword, idShop);
+    graph.connect(idShop, idApple);
+    graph.connect(idApple, idShop);
+    graph.connect(idShop, idBack);
+    graph.connect(idBack, idChoice);
 
     try {
         vn::Print print = vn::Print(nodeFrameChoice);
