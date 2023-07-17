@@ -62,39 +62,36 @@ public:
 
 struct Op : Node
 {
-    virtual void accept(Compute &compute) const = 0;
-    virtual void accept(Visitor &visitor) const override;
+    void accept(Visitor &visitor) const override;
 
     using Value = std::variant<Text, bool, int>;
     constexpr const static std::array<const char *, std::variant_size_v<Value>> names {
         "error", "bool", "int",
     };
-
-    Value value_ = Text("Isn't computed");
 };
 
 
 struct Static42 : Op
 {
-    void accept(Compute &compute) const override;
+    void accept(Visitor &visitor) const override;
 };
 
 
 struct Static69 : Op
 {
-    void accept(Compute &compute) const override;
+    void accept(Visitor &visitor) const override;
 };
 
 
 struct Equal : Op
 {
-    void accept(Compute &compute) const override;
+    void accept(Visitor &visitor) const override;
 };
 
 
 struct NonEqual : Op
 {
-    void accept(Compute &compute) const override;
+    void accept(Visitor &visitor) const override;
 };
 
 
@@ -122,9 +119,13 @@ struct Visitor
     inline virtual void visit(const Counter &node)   { return visit(static_cast<const Node &>(node)); }
     inline virtual void visit(const Advance &node)   { return visit(static_cast<const Node &>(node)); }
     inline virtual void visit(const Op &node)        { return visit(static_cast<const Node &>(node)); }
+    inline virtual void visit(const Equal &node)     { return visit(static_cast<const Op &>(node)); }
+    inline virtual void visit(const NonEqual &node)  { return visit(static_cast<const Op &>(node)); }
+    inline virtual void visit(const Static42 &node)  { return visit(static_cast<const Op &>(node)); }
+    inline virtual void visit(const Static69 &node)  { return visit(static_cast<const Op &>(node)); }
     inline virtual bool shouldStop() const           { return false; }
     inline virtual void stepIn(const Node &)         {}
-    inline virtual void stepOut(const Node &)        {}
+    inline virtual void stepOut()                    {}
 };
 
 
@@ -133,12 +134,9 @@ struct Q_PACKED Print : Visitor
     Print(const Node *start);
     void visit(const Frame &frame) override;
     void visit(const Predicate &predicate) override;
-    void visit(const Counter &counter) override;
-    void visit(const Advance &advance) override;
-    void visit(const Op &advance) override;
     inline bool shouldStop() const override { return shouldStop_; }
     inline void stepIn(const Node &) override { depth_++; }
-    inline void stepOut(const Node &) override { depth_--; }
+    inline void stepOut() override { depth_--; }
 private:
     static QString space(const int depth);
     const Node *start_ = nullptr;
@@ -150,37 +148,10 @@ private:
 struct ToGraphViz : Visitor
 {
     ToGraphViz() = default;
-    void visit(const Frame &frame) override
-    {
-        ss_ << ptrToId_.value(&frame, -1)
-            << " [label=\""
-            << frame.title().toStdString()
-            << ":\\n"
-            << frame.text().toStdString()
-            << "\"]\n";
-    }
-    void stepIn(const Node &node) override
-    {
-        const Node *ptr = &node;
-        ptrToId_.insert(ptr, ptrToId_.value(ptr, ptrToId_.size()));
-        stack_.push_back(ptr);
-
-        const NodeId idSrc = ptrToId_.value(parent_, -1);
-        const NodeId idDst = ptrToId_.value(ptr);
-        parent_ = ptr;
-
-        if (idSrc >= 0)
-            ss_ << idSrc << "->" << idDst << ";\n";
-    }
-    void stepOut(const Node &) override
-    {
-        stack_.pop_back();
-        parent_ = stack_.empty() ? nullptr : stack_.back();
-    }
-    QString digraphText() const
-    {
-        return QString("digraph {\n%1\n}").arg(QString::fromStdString(ss_.str()));
-    }
+    void visit(const Frame &frame) override;
+    void stepIn(const Node &node) override;
+    void stepOut() override;
+    QString digraphText() const;
 private:
     QMap<const Node *, NodeId> ptrToId_;
     QVector<const Node *> stack_;
@@ -191,30 +162,33 @@ private:
 
 struct Compute : Visitor
 {
-    Compute();
-    void visit(const Frame &frame) override;
-    void visit(const Predicate &predicate) override;
-    void visit(const Counter &counter) override;
-    void visit(const Advance &advance) override;
-    void visit(const Op &advance) override;
-    void visit(const Equal &op);
-    void visit(const NonEqual &op);
-    void visit(const Static42 &op);
-    void visit(const Static69 &op);
-    inline bool shouldStop() const override { return false; }
+    Compute() = default;
+    void visit(const Equal &op) override;
+    void visit(const NonEqual &op) override;
+    void visit(const Static42 &op) override;
+    void visit(const Static69 &op) override;
+    void stepIn(const Node &node) override;
+    void stepOut() override;
+    bool shouldStop() const override;
 private:
-    std::vector<Op::Value> stack_;
+    using Value = Op::Value;
+    using LazyValue = std::function<Value()>;
+    using MaybeLazyValue = std::variant<LazyValue, Value>;
+
+    QVector<const Node *> stack_;
+    QMap<const Node *, MaybeLazyValue> opToFoo_;
+    QVector<Value> values_;
 
     template <typename T>
     static bool read(const Op::Value &value, T &res)
     {
         const T *variantPtr = std::get_if<T>(&value);
         if (variantPtr == nullptr) {
-            const std::size_t nameExpectedInd = variant_index<Op::Value, T>();
-            const std::size_t nameRecievedInd = value.index();
-            res = Text("Expected %1 but recieved %2")
-                    .arg(Op::names.at(nameExpectedInd))
-                    .arg(Op::names.at(nameRecievedInd));
+//            const std::size_t nameExpectedInd = variant_index<Op::Value, T>();
+//            const std::size_t nameRecievedInd = value.index();
+//            res = Text("Expected %1 but recieved %2")
+//                    .arg(Op::names.at(nameExpectedInd))
+//                    .arg(Op::names.at(nameRecievedInd));
             return false;
         }
         res = *variantPtr;
@@ -231,11 +205,10 @@ struct Graph
     void connect(const NodeId src, const NodeId dst);
     void disconnect(const NodeId src, const NodeId dst);
 
-
     const Node &node(const NodeId id) const;
-    const QSet<NodeId> next(const NodeId id) const;
+    const QVector<NodeId> next(const NodeId id) const;
     QMap<NodeId, Node *> nodes_;
-    QMap<NodeId, QSet<NodeId>> connections_;
+    QMap<NodeId, QVector<NodeId>> connections_;
 };
 
 
@@ -316,6 +289,6 @@ struct Counters
 namespace vn = VisualNovelGraph;
 
 
-//std::ostream &operator<<(std::ostream &stream, const vn::Op::Value &value);
+std::ostream &operator<<(std::ostream &stream, const vn::Op::Value &value);
 
 #endif // HEADERS_H

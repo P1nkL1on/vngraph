@@ -23,7 +23,7 @@ void vn::Graph::connect(const NodeId src, const NodeId dst)
         throw Error(QString("Missing node with id %1 as connection source").arg(src));
     if (!nodes_.contains(dst))
         throw Error(QString("Missing node with id %1 as connection destination").arg(dst));
-    connections_[src].insert(dst);
+    connections_[src].append(dst);
 }
 
 const vn::Node &vn::Graph::node(const vn::NodeId id) const
@@ -35,7 +35,7 @@ const vn::Node &vn::Graph::node(const vn::NodeId id) const
     throw Error(QString("Missing node with id %1").arg(id));
 }
 
-const QSet<vn::NodeId> vn::Graph::next(const vn::NodeId id) const
+const QVector<vn::NodeId> vn::Graph::next(const vn::NodeId id) const
 {
     return connections_.value(id, {});
 }
@@ -58,7 +58,7 @@ void vn::traverse_(
     const Node &node = graph.node(id);
     visitor.stepIn(node);
     if (traversed.contains(id)) {
-        visitor.stepOut(node);
+        visitor.stepOut();
         return;
     }
 
@@ -66,21 +66,19 @@ void vn::traverse_(
     node.accept(visitor);
 
     if (visitor.shouldStop()) {
-        visitor.stepOut(node);
+        visitor.stepOut();
         return;
     }
 
-    const QSet<vn::NodeId> next = graph.next(id);
+    const QVector<vn::NodeId> next = graph.next(id);
     if (next.isEmpty()) {
-        visitor.stepOut(node);
+        visitor.stepOut();
         return;
     }
 
-    QList<vn::NodeId> nextSorted = next.toList();
-    std::sort(nextSorted.begin(), nextSorted.end());
-    for (const NodeId id : nextSorted)
+    for (const NodeId id : next)
         traverse_(graph, id, visitor, traversed);
-    visitor.stepOut(node);
+    visitor.stepOut();
 }
 
 void vn::Frame::accept(Visitor &visitor) const
@@ -128,162 +126,140 @@ void vn::Print::visit(const Predicate &predicate)
             << predicate.isOk();
 }
 
-void vn::Print::visit(const Counter &counter)
-{
-    Q_UNUSED(counter)
-    shouldStop_ = false;
-    qDebug().noquote()
-            << space(depth_)
-            << "counter";
-}
-
-void vn::Print::visit(const Advance &advance)
-{
-    Q_UNUSED(advance)
-    shouldStop_ = false;
-    qDebug().noquote()
-            << space(depth_)
-            << "advance";
-}
-
-void vn::Print::visit(const Op &advance)
-{
-    Q_UNUSED(advance)
-    shouldStop_ = false;
-    qDebug().noquote()
-            << space(depth_)
-            << "op";
-}
-
 QString vn::Print::space(const int depth)
 {
     return QString("*").rightJustified(depth * 2);
 }
 
-
-//void vn::ToJson::visit(const Frame &frame)
-//{
-//    Q_ASSERT(!ids_.contains(&frame));
-//    const NodeId id = ids_.isEmpty() ? 0 : (ids_.last() + 1);
-//    ids_.insert(&frame, id);
-//    last_ = &frame;
-////    qDebug() << "frame" << id << frame.title() << frame.text();
-
-//    if (!stack_.isEmpty() && stack_.back() != last_) {
-//        const NodeId src = ids_.value(stack_.back(), -1);
-//        const NodeId dst = id;
-//        qDebug().noquote().nospace() << src  << "->" << dst << ";";
-//    }
-//}
-
-//void vn::ToJson::visit(const Predicate &predicate)
-//{
-
-//}
-
-//void vn::ToJson::visit(const Counter &counter)
-//{
-
-//}
-
-//void vn::ToJson::visit(const Advance &advance)
-//{
-
-//}
-
-//void vn::ToJson::visit(const Op &advance)
-//{
-
-//}
-
-//void vn::ToJson::increaseDepth()
-//{
-//    stack_.push_back(last_);
-//}
-
-//void vn::ToJson::decreaseDepth()
-//{
-//    last_ = stack_.back();
-//    stack_.pop_back();
-//}
-
-//void vn::Compute::visit(const Frame &frame)
-//{
-
-//}
-
-void vn::Compute::visit(const Predicate &predicate)
+void vn::ToGraphViz::visit(const Frame &frame)
 {
-
+    ss_ << ptrToId_.value(&frame, -1)
+        << " [label=\""
+        << frame.title().toStdString()
+        << ":\\n"
+        << frame.text().toStdString()
+        << "\"]\n";
 }
 
-void vn::Compute::visit(const Counter &counter)
+void vn::ToGraphViz::stepIn(const Node &node)
 {
+    const Node *ptr = &node;
+    ptrToId_.insert(ptr, ptrToId_.value(ptr, ptrToId_.size()));
+    stack_.push_back(ptr);
 
+    const NodeId idSrc = ptrToId_.value(parent_, -1);
+    const NodeId idDst = ptrToId_.value(ptr);
+    parent_ = ptr;
+
+    if (idSrc >= 0)
+        ss_ << idSrc << "->" << idDst << ";\n";
 }
 
-void vn::Compute::visit(const Advance &advance)
+void vn::ToGraphViz::stepOut()
 {
-
+    stack_.pop_back();
+    parent_ = stack_.empty() ? nullptr : stack_.back();
 }
 
-void vn::Compute::visit(const Op &advance)
+QString vn::ToGraphViz::digraphText() const
 {
-
+    return QString("digraph {\n%1\n}").arg(QString::fromStdString(ss_.str()));
 }
-
 void vn::Compute::visit(const Equal &op)
 {
+    opToFoo_.insert(&op, LazyValue([this]{
+        int l;
+        int r;
+        if (!read(values_[0], l))
+            return Value("Missing left part of the equality!");
+        if (!read(values_[1], r))
+            return Value("Missing right part of the equality!");
+
+        values_.pop_back();
+        values_.pop_back();
+        return Value(l == r);
+    }));
 }
 
 void vn::Compute::visit(const NonEqual &op)
 {
-
+    opToFoo_.insert(&op, LazyValue([]{ return Op::Value(13); }));
 }
 
-void vn::Compute::visit(const Static42 &)
+void vn::Compute::visit(const Static42 &op)
 {
-    stack_.push_back(42);
+    opToFoo_.insert(&op, Value(42));
 }
 
-void vn::Compute::visit(const Static69 &)
+void vn::Compute::visit(const Static69 &op)
 {
-    stack_.push_back(69);
+    opToFoo_.insert(&op, Value(69));
 }
 
-void vn::Static42::accept(Compute &compute) const
+void vn::Compute::stepIn(const Node &node)
 {
-    return compute.visit(*this);
+    stack_.push_back(&node);
 }
 
-void vn::Static69::accept(Compute &compute) const
+void vn::Compute::stepOut()
 {
-    return compute.visit(*this);
+    Q_ASSERT(!stack_.isEmpty());
+    const Node *node = stack_.back();
+    stack_.pop_back();
+
+    MaybeLazyValue maybeLazyValue = opToFoo_.value(node);
+    Value *value = std::get_if<Value>(&maybeLazyValue);
+    if (value != nullptr) {
+        values_.push_front(*value);
+        std::cout << "get " << node << " -> " << *value << "\n";
+        return;
+    }
+
+    const auto foo = std::get<LazyValue>(maybeLazyValue);
+    const Value res = foo();
+    opToFoo_.insert(node, res);
+    values_.push_front(res);
+    std::cout << "compute " << node << " -> " << res << "\n";
 }
 
-void vn::Equal::accept(Compute &compute) const
+bool vn::Compute::shouldStop() const
 {
-    return compute.visit(*this);
+    return false;
 }
 
-void vn::NonEqual::accept(Compute &compute) const
+void vn::Static42::accept(Visitor &visitor) const
 {
-    return compute.visit(*this);
+    return visitor.visit(*this);
 }
 
-//std::ostream &operator<<(std::ostream &stream, const vn::Op::Value &value)
-//{
-//    std::visit([&stream](auto &&arg) {
-//        using T = std::decay_t<decltype(arg)>;
-//        const std::size_t ind = vn::variant_index<vn::Op::Value, T>();
-//        stream << vn::Op::names.at(ind);
-//        if constexpr (std::is_same_v<T, int>)
-//            stream << " " << arg;
-//        else if constexpr (std::is_same_v<T, bool>)
-//            stream << (arg ? " True" : " False");
-//    }, value);
-//    return stream;
-//}
+void vn::Static69::accept(Visitor &visitor) const
+{
+    return visitor.visit(*this);
+}
+
+void vn::Equal::accept(Visitor &visitor) const
+{
+    return visitor.visit(*this);
+}
+
+void vn::NonEqual::accept(Visitor &visitor) const
+{
+    return visitor.visit(*this);
+}
+
+std::ostream &operator<<(std::ostream &stream, const vn::Op::Value &value)
+{
+    std::visit([&stream](auto &&arg) {
+        using T = std::decay_t<decltype(arg)>;
+        const std::size_t ind = vn::variant_index<vn::Op::Value, T>();
+        stream << vn::Op::names.at(ind);
+        if constexpr (std::is_same_v<T, int>)
+            stream << " " << arg;
+        else if constexpr (std::is_same_v<T, bool>)
+            stream << (arg ? " True" : " False");
+    }, value);
+    return stream;
+}
 
 
 //bool vn::PredicateCompare::isOk(const Counters &counters) const
@@ -384,10 +360,17 @@ int main(int argc, char *argv[])
     const vn::NodeId id69 = graph.add(new vn::Static69);
     const vn::NodeId idEq = graph.add(new vn::Equal);
     const vn::NodeId idNeq = graph.add(new vn::NonEqual);
-    graph.connect(id42, idEq);
-    graph.connect(id69, idEq);
-    graph.connect(id42, idNeq);
-    graph.connect(id69, idNeq);
+    const vn::NodeId idEq2 = graph.add(new vn::Equal);
+
+    /// 42 -> != <- 69
+    graph.connect(idNeq, id42);
+    graph.connect(idNeq, id69);
+    graph.connect(idEq, id42);
+    graph.connect(idEq, id42);
+    graph.connect(idEq2, idEq);
+    graph.connect(idEq2, idNeq);
+
+    /// polish notation: 42 42 == 42 69 != ==
 
     try {
         vn::Print print = vn::Print(nodeFrameChoice);
@@ -396,16 +379,21 @@ int main(int argc, char *argv[])
 
         print = vn::Print(nodeFrameShop);
         vn::traverse(graph, 4, print);
+        qDebug() << "";
 
+        vn::ToGraphViz json;
+        vn::traverse(graph, 0, json);
+        qDebug() << json.digraphText();
+        qDebug() << "";
+
+        vn::Compute compute;
+        vn::traverse(graph, idEq2, compute);
 
     } catch (const vn::Error &err) {
         qDebug() << err.message;
         return 1;
     }
 
-    vn::ToGraphViz json;
-    vn::traverse(graph, 0, json);
-    qDebug() << json.digraphText();
 
     return 0;
 }
