@@ -33,7 +33,7 @@ Window::Window(QWidget *parent) : QMainWindow(parent)
     setCentralWidget(w);
 
     /// read
-    root_ = readTree("/home/pl/jff/vn/script.md");
+    root_ = readTree("/home/pl/jff/vngraph/vn/script.md");
 
     /// step
     printNode(this, root_);
@@ -51,10 +51,20 @@ Ptr<INode> Window::readTree(const FilePath &filePath)
     if (!inputFile.open(QIODevice::ReadOnly))
         return nullptr;
     QTextStream in(&inputFile);
+    struct IParser
+    {
+        virtual ~IParser() = default;
+        virtual int newNode(const Text &cover, const Text &text) = 0;
+        virtual void connect(const int parent, const int child) = 0;
+        virtual Text line(const int) const = 0;
+    };
+
     struct Reader
     {
-        Ptr<Node> root_ = nullptr;
-        std::vector<Ptr<Node>> stack_;
+        IParser *parser_ = nullptr;
+        std::vector<int> stack_;
+        bool hasRoot_ = false;
+
         static int numberOfSpaces(const Text &line)
         {
             return line.indexOf(QRegExp("[^\\s]"));
@@ -66,7 +76,7 @@ Ptr<INode> Window::readTree(const FilePath &filePath)
                 return -1;
             return line.mid(0, line.indexOf(". ")).toInt();
         }
-        static Ptr<Node> last(const std::vector<Ptr<Node>> &stack, const int ind = 0)
+        static int last(const std::vector<int> &stack, const int ind = 0)
         {
             const int n = stack.size();
             Q_ASSERT(n > ind);
@@ -74,62 +84,100 @@ Ptr<INode> Window::readTree(const FilePath &filePath)
         }
         bool operator()(const Text &line)
         {
-            if (root_ == nullptr) {
-                Ptr<Node> n(new Node);
-                n->text_ = line;
-                stack_.push_back(n);
-                root_ = n;
+            if (!hasRoot_) {
+                hasRoot_ = true;
+                const int id = parser_->newNode("", line);
+                stack_.push_back(id);
                 return true;
             }
 
-            Ptr<Node> last_ = last(stack_);
-            const int tab = numberOfSpaces(last_->text_);
+            int lastId_ = last(stack_);
+            const int tab = numberOfSpaces(parser_->line(lastId_));
             const int tab2 = numberOfSpaces(line);
             if (tab2 <= tab) {
                 if (tab2 < tab) {
-                    // TODO: pop until new tab will match last in stack
-                    stack_.pop_back();
-                    last_ = last(stack_);
+                    /// NOTE: poping until new tab will match last in stack
+                    /// and it won't be a numeric option
+                    for (;;) {
+                        if (stack_.empty()) {
+                            qWarning() << "Bad tab alignment on returning to previous lines. Failed at "<< line;
+                            return false;
+                        }
+                        stack_.pop_back();
+                        lastId_ = last(stack_);
+                        const int tab0 = numberOfSpaces(parser_->line(lastId_));
+                        const int num0 = numberInFront(parser_->line(lastId_));
+                        if (tab0 <= tab2 && num0 == -1)
+                            break;
+                    }
                 }
-                const int numStart = numberInFront(last_->text_);
+                const int numStart = numberInFront(parser_->line(lastId_));
                 const int numStart2 = numberInFront(line);
                 if (numStart2 != -1 && numStart != -1) {
                     stack_.pop_back();
-                    last_ = last(stack_);
+                    lastId_ = last(stack_);
                 }
-                Ptr<Node> n(new Node);
                 const bool isOption = (numStart2 != -1);
                 if (!isOption) {
-                    n->text_ = line;
-                    n->cover_ = "->";
+                    const int id = parser_->newNode("->", line);
+                    parser_->connect(lastId_, id);
                     stack_.pop_back();
-                    stack_.push_back(n);
-                    last_->nodes_.push_back(n);
+                    stack_.push_back(id);
                     return true;
                 }
-                n->text_ = line; // TODO: remove the number
-                n->cover_ = line;
-                stack_.push_back(n);
-                last_->nodes_.push_back(n);
+                // TODO: remove the number from line. cover is good
+                const int id = parser_->newNode(line, line);
+                parser_->connect(lastId_, id);
+                stack_.push_back(id);
                 return true;
             }
             if (tab2 > tab) {
                 /// NOTE: option branch
-                if (numberInFront(last_->text_) == -1) {
+                if (numberInFront(parser_->line(lastId_)) == -1) {
                     qWarning() << "Branch can be only from option. For now at least. Failed at "<< line;
                     return false;
                 }
-                Ptr<Node> n(new Node);
-                n->text_ = line;
-                n->cover_ = "->";
-                last_->nodes_.push_back(n);
-                stack_.push_back(n);
+                const int id = parser_->newNode("->", line);
+                parser_->connect(lastId_, id);
+                stack_.push_back(id);
                 return true;
             }
             qWarning() << "not implemented for " << line;
             return false;
         }
     } reader;
+
+    struct Parser final : IParser
+    {
+        int newNode(const Text &cover, const Text &text) override
+        {
+            Ptr<Node> n(new Node);
+            n->cover_ = cover;
+            n->text_ = text;
+            nodes_.push_back(n);
+            return nodes_.size() - 1;
+        }
+        void connect(const int parent, const int child) override
+        {
+            Q_ASSERT(parent < nodes_.size());
+            Q_ASSERT(child < nodes_.size());
+            nodes_.at(parent)->nodes_.push_back(nodes_.at(child));
+        }
+        Text line(const int ind) const override
+        {
+            Q_ASSERT(ind < nodes_.size());
+            return nodes_.at(ind)->text();
+        }
+        inline Ptr<INode> res() const
+        {
+            return nodes_.empty() ? nullptr : nodes_.at(0);
+        }
+    private:
+        std::vector<Ptr<Node>> nodes_;
+    };
+
+    Parser parser;
+    reader.parser_ = &parser;
 
     /// tests for Reader::numberOfSpaces
     Q_ASSERT(Reader::numberOfSpaces("ok") == 0);
@@ -159,7 +207,7 @@ Ptr<INode> Window::readTree(const FilePath &filePath)
             break;
     }
     inputFile.close();
-    return reader.root_;
+    return parser.res();
 }
 
 void Window::printNode(Window *w, Ptr<INode> root)
